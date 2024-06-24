@@ -17,7 +17,7 @@
 // <website>https://github.com/facebook-csharp-sdk/simple-json</website>
 //-----------------------------------------------------------------------
 
-// VERSION:
+// VERSION: 0.38.0
 
 // NOTE: uncomment the following line to make SimpleJson class internal.
 //#define SIMPLE_JSON_INTERNAL
@@ -36,7 +36,7 @@
 
 // NOTE: uncomment the following line to disable linq expressions/compiled lambda (better performance) instead of method.invoke().
 // define if you are using .net framework <= 3.0 or < WP7.5
-//#define SIMPLE_JSON_NO_LINQ_EXPRESSION
+define SIMPLE_JSON_NO_LINQ_EXPRESSION
 
 // NOTE: uncomment the following line if you are compiling under Window Metro style application/library.
 // usually already defined in properties
@@ -45,6 +45,11 @@
 // If you are targetting WinStore, WP8 and NET4.5+ PCL make sure to #define SIMPLE_JSON_TYPEINFO;
 
 // original json parsing code from http://techblog.procurios.nl/k/618/news/view/14605/14863/How-do-I-write-my-own-parser-for-JSON.html
+//add
+#if NETFX_CORE
+//#define SIMPLE_JSON_DATACONTRACT
+//#define SIMPLE_JSON_DYNAMIC
+#endif
 
 #if NETFX_CORE
 #define SIMPLE_JSON_TYPEINFO
@@ -66,13 +71,112 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
-using SimpleJson.Reflection;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+//using GitHub.Unity.Json;
 
 // ReSharper disable LoopCanBeConvertedToQuery
 // ReSharper disable RedundantExplicitArrayCreation
 // ReSharper disable SuggestUseVarKeywordEvident
-namespace SimpleJson
+namespace SimpleJsonEx//GitHub.Unity.Json
 {
+    static class Constants
+    {
+        public const string Iso8601Format = @"yyyy-MM-dd\THH\:mm\:ss.fffzzz";
+        public const string Iso8601FormatZ = @"yyyy-MM-dd\THH\:mm\:ss\Z";
+        public static readonly string[] Iso8601Formats = {
+            Iso8601Format,
+            Iso8601FormatZ,
+            @"yyyy-MM-dd\THH\:mm\:ss.fffffffzzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.ffffffzzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.fffffzzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.ffffzzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.ffzzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.fzzz",
+            @"yyyy-MM-dd\THH\:mm\:sszzz",
+            @"yyyy-MM-dd\THH\:mm\:ss.fffffff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.ffffff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.fffff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.ffff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.fff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.ff\Z",
+            @"yyyy-MM-dd\THH\:mm\:ss.f\Z",
+        };
+    }
+    [Serializable]
+    internal class InstanceNotInitializedException : InvalidOperationException
+    {
+        public InstanceNotInitializedException(object the, string property) :
+            base(String.Format(CultureInfo.InvariantCulture, "{0} is not correctly initialized, {1} is null", the?.GetType().Name, property)) { }
+
+        protected InstanceNotInitializedException(SerializationInfo info, StreamingContext context) : base(info, context) { }
+    }
+    internal static class Guard
+    {
+        public static void NotNull(object the, object value, string propertyName) {
+            if(value != null) return;
+            throw new InstanceNotInitializedException(the, propertyName);
+        }
+        public static void ArgumentNotNull(object value, string name) {
+            if(value != null) return;
+            string message = String.Format(CultureInfo.InvariantCulture, "Failed Null Check on '{0}'", name);
+            throw new ArgumentNullException(name, message);
+        }
+
+        public static void ArgumentNotNullOrEmpty<T>(IList<T> value, string name) {
+            if(value == null) {
+                string message = String.Format(CultureInfo.InvariantCulture, "Failed Null Check on '{0}'", name);
+                throw new ArgumentNullException(name, message);
+            }
+
+            if(value.Count==0) {
+                string message = String.Format(CultureInfo.InvariantCulture, "Failed Empty Check on '{0}'", name);
+                throw new ArgumentNullException(name, message);
+            }
+        }
+
+        public static void ArgumentNonNegative(int value, string name) {
+            if(value > -1) return;
+
+            var message = String.Format(CultureInfo.InvariantCulture, "The value for '{0}' must be non-negative", name);
+            throw new ArgumentException(message, name);
+        }
+
+        /// <summary>
+        ///   Checks a string argument to ensure it isn't null or empty.
+        /// </summary>
+        /// <param name = "value">The argument value to check.</param>
+        /// <param name = "name">The name of the argument.</param>
+        public static void ArgumentNotNullOrWhiteSpace(string value, string name) {
+            if(value != null && value.Trim().Length > 0)
+                return;
+            string message = String.Format(CultureInfo.InvariantCulture, "The value for '{0}' must not be empty", name);
+            throw new ArgumentException(message, name);
+        }
+
+        public static void ArgumentInRange(int value, int minValue, string name) {
+            if(value >= minValue) return;
+            string message = String.Format(CultureInfo.InvariantCulture,
+                "The value '{0}' for '{1}' must be greater than or equal to '{2}'",
+                value,
+                name,
+                minValue);
+            throw new ArgumentOutOfRangeException(name, message);
+        }
+
+        public static void ArgumentInRange(int value, int minValue, int maxValue, string name) {
+            if(value >= minValue && value <= maxValue) return;
+            string message = String.Format(CultureInfo.InvariantCulture,
+                "The value '{0}' for '{1}' must be greater than or equal to '{2}' and less than or equal to '{3}'",
+                value,
+                name,
+                minValue,
+                maxValue);
+            throw new ArgumentOutOfRangeException(name, message);
+        }
+
+        public static bool InUnitTestRunner { get; set; }
+    }
     /// <summary>
     /// Represents the json array.
     /// </summary>
@@ -87,12 +191,12 @@ namespace SimpleJson
  class JsonArray : List<object>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="JsonArray"/> class. 
+        /// Initializes a new instance of the <see cref="JsonArray"/> class.
         /// </summary>
         public JsonArray() { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="JsonArray"/> class. 
+        /// Initializes a new instance of the <see cref="JsonArray"/> class.
         /// </summary>
         /// <param name="capacity">The capacity of the json array.</param>
         public JsonArray(int capacity) : base(capacity) { }
@@ -260,7 +364,7 @@ namespace SimpleJson
         /// </summary>
         /// <param name="item">The item.</param>
         /// <returns>
-        /// 	<c>true</c> if [contains] [the specified item]; otherwise, <c>false</c>.
+        ///     <c>true</c> if [contains] [the specified item]; otherwise, <c>false</c>.
         /// </returns>
         public bool Contains(KeyValuePair<string, object> item)
         {
@@ -297,7 +401,7 @@ namespace SimpleJson
         /// Gets a value indicating whether this instance is read only.
         /// </summary>
         /// <value>
-        /// 	<c>true</c> if this instance is read only; otherwise, <c>false</c>.
+        ///     <c>true</c> if this instance is read only; otherwise, <c>false</c>.
         /// </value>
         public bool IsReadOnly
         {
@@ -482,14 +586,11 @@ namespace SimpleJson
         }
 #endif
     }
-}
 
-namespace SimpleJson
-{
     /// <summary>
     /// This class encodes and decodes JSON strings.
     /// Spec. details, see http://www.json.org/
-    /// 
+    ///
     /// JSON uses Arrays and Objects. These correspond here to the datatypes JsonArray(IList&lt;object>) and JsonObject(IDictionary&lt;string,object>).
     /// All numbers are parsed to doubles.
     /// </summary>
@@ -621,7 +722,7 @@ namespace SimpleJson
             StringBuilder sb = new StringBuilder();
             char c;
 
-            for (int i = 0; i < jsonString.Length; )
+            for (int i = 0; i < jsonString.Length;)
             {
                 c = jsonString[i++];
 
@@ -1222,7 +1323,7 @@ namespace SimpleJson
 
 #endif
     }
-    
+
     [GeneratedCode("simple-json", "1.0.0")]
 #if SIMPLE_JSON_INTERNAL
     internal
@@ -1251,12 +1352,7 @@ namespace SimpleJson
         internal static readonly Type[] EmptyTypes = new Type[0];
         internal static readonly Type[] ArrayConstructorParameterTypes = new Type[] { typeof(int) };
 
-        private static readonly string[] Iso8601Format = new string[]
-                                                             {
-                                                                 @"yyyy-MM-dd\THH:mm:ss.FFFFFFF\Z",
-                                                                 @"yyyy-MM-dd\THH:mm:ss\Z",
-                                                                 @"yyyy-MM-dd\THH:mm:ssK"
-                                                             };
+        private static readonly string[] Iso8601Format = Constants.Iso8601Formats;
 
         public PocoJsonSerializerStrategy()
         {
@@ -1272,7 +1368,7 @@ namespace SimpleJson
 
         internal virtual ReflectionUtils.ConstructorDelegate ContructorDelegateFactory(Type key)
         {
-            return ReflectionUtils.GetContructor(key, key.IsArray ? ArrayConstructorParameterTypes : EmptyTypes);
+            return ReflectionUtils.GetContructor(key, (key.IsArray || ReflectionUtils.IsAssignableFrom(typeof(IList), key))? ArrayConstructorParameterTypes : EmptyTypes);
         }
 
         internal virtual IDictionary<string, ReflectionUtils.GetDelegate> GetterValueFactory(Type type)
@@ -1283,14 +1379,14 @@ namespace SimpleJson
                 if (propertyInfo.CanRead)
                 {
                     MethodInfo getMethod = ReflectionUtils.GetGetterMethodInfo(propertyInfo);
-                    if (getMethod.IsStatic || !getMethod.IsPublic)
+                    if (!CanAddProperty(propertyInfo, getMethod))
                         continue;
                     result[MapClrMemberNameToJsonFieldName(propertyInfo.Name)] = ReflectionUtils.GetGetMethod(propertyInfo);
                 }
             }
             foreach (FieldInfo fieldInfo in ReflectionUtils.GetFields(type))
             {
-                if (fieldInfo.IsStatic || !fieldInfo.IsPublic)
+                if (!CanAddField(fieldInfo))
                     continue;
                 result[MapClrMemberNameToJsonFieldName(fieldInfo.Name)] = ReflectionUtils.GetGetMethod(fieldInfo);
             }
@@ -1305,18 +1401,38 @@ namespace SimpleJson
                 if (propertyInfo.CanWrite)
                 {
                     MethodInfo setMethod = ReflectionUtils.GetSetterMethodInfo(propertyInfo);
-                    if (setMethod.IsStatic || !setMethod.IsPublic)
+                    if (!CanAddProperty(propertyInfo, setMethod))
                         continue;
                     result[MapClrMemberNameToJsonFieldName(propertyInfo.Name)] = new KeyValuePair<Type, ReflectionUtils.SetDelegate>(propertyInfo.PropertyType, ReflectionUtils.GetSetMethod(propertyInfo));
                 }
             }
             foreach (FieldInfo fieldInfo in ReflectionUtils.GetFields(type))
             {
-                if (fieldInfo.IsInitOnly || fieldInfo.IsStatic || !fieldInfo.IsPublic)
+                if (fieldInfo.IsInitOnly || !CanAddField(fieldInfo))
                     continue;
                 result[MapClrMemberNameToJsonFieldName(fieldInfo.Name)] = new KeyValuePair<Type, ReflectionUtils.SetDelegate>(fieldInfo.FieldType, ReflectionUtils.GetSetMethod(fieldInfo));
             }
             return result;
+        }
+
+        protected virtual bool CanAddField(FieldInfo field)
+        {
+            if (field.IsStatic)
+                return false;
+            if (ReflectionUtils.GetAttribute(field, typeof(NotSerializedAttribute)) != null)
+                return false;
+            if (ReflectionUtils.GetAttribute(field, typeof(CompilerGeneratedAttribute)) != null)
+                return false;
+            return true;
+        }
+
+        protected virtual bool CanAddProperty(PropertyInfo property, MethodInfo method)
+        {
+            if (method.IsStatic)
+                return false;
+            if (ReflectionUtils.GetAttribute(property, typeof(NotSerializedAttribute)) != null)
+                return false;
+            return true;
         }
 
         public virtual bool TrySerializeNonPrimitiveObject(object input, out object output)
@@ -1330,39 +1446,43 @@ namespace SimpleJson
             if (type == null) throw new ArgumentNullException("type");
             string str = value as string;
 
-            if (type == typeof (Guid) && string.IsNullOrEmpty(str))
+            if (type == typeof(Guid) && string.IsNullOrEmpty(str))
                 return default(Guid);
 
             if (value == null)
                 return null;
-            
+
             object obj = null;
 
             if (str != null)
             {
                 if (str.Length != 0) // We know it can't be null now.
                 {
+                    //if (type == typeof(NPath) || (ReflectionUtils.IsNullableType(type) && Nullable.GetUnderlyingType(type) == typeof(NPath)))
+                    //    return new NPath(str);
                     if (type == typeof(DateTime) || (ReflectionUtils.IsNullableType(type) && Nullable.GetUnderlyingType(type) == typeof(DateTime)))
                         return DateTime.ParseExact(str, Iso8601Format, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
                     if (type == typeof(DateTimeOffset) || (ReflectionUtils.IsNullableType(type) && Nullable.GetUnderlyingType(type) == typeof(DateTimeOffset)))
                         return DateTimeOffset.ParseExact(str, Iso8601Format, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
                     if (type == typeof(Guid) || (ReflectionUtils.IsNullableType(type) && Nullable.GetUnderlyingType(type) == typeof(Guid)))
                         return new Guid(str);
+                    //if (type == typeof(UriString) || (ReflectionUtils.IsNullableType(type) && Nullable.GetUnderlyingType(type) == typeof(UriString)))
+                    //    return new UriString(str);
                     if (type == typeof(Uri))
                     {
-                        bool isValid =  Uri.IsWellFormedUriString(str, UriKind.RelativeOrAbsolute);
+                        bool isValid = Uri.IsWellFormedUriString(str, UriKind.RelativeOrAbsolute);
 
                         Uri result;
                         if (isValid && Uri.TryCreate(str, UriKind.RelativeOrAbsolute, out result))
                             return result;
 
-												return null;
+                        return null;
                     }
-                  
-									if (type == typeof(string))  
-										return str;
 
-									return Convert.ChangeType(str, type, CultureInfo.InvariantCulture);
+                    if (type == typeof(string))
+                        return str;
+
+                    return Convert.ChangeType(str, type, CultureInfo.InvariantCulture);
                 }
                 else
                 {
@@ -1379,7 +1499,7 @@ namespace SimpleJson
             }
             else if (value is bool)
                 return value;
-            
+
             bool valueIsLong = value is long;
             bool valueIsDouble = value is double;
             if ((valueIsLong && type == typeof(long)) || (valueIsDouble && type == typeof(double)))
@@ -1473,6 +1593,8 @@ namespace SimpleJson
         protected virtual bool TrySerializeKnownTypes(object input, out object output)
         {
             bool returnValue = true;
+            //if (input is NPath || input is UriString)
+            //    output = input.ToString();
             if (input is DateTime)
                 output = ((DateTime)input).ToUniversalTime().ToString(Iso8601Format[0], CultureInfo.InvariantCulture);
             else if (input is DateTimeOffset)
@@ -1593,10 +1715,8 @@ namespace SimpleJson
 
 #endif
 
-    namespace Reflection
-    {
         // This class is meant to be copied into other libraries. So we want to exclude it from Code Analysis rules
- 	    // that might be in place in the target project.
+        // that might be in place in the target project.
         [GeneratedCode("reflection-utils", "1.0.0")]
 #if SIMPLE_JSON_REFLECTION_UTILS_PUBLIC
         public
@@ -1649,7 +1769,7 @@ namespace SimpleJson
                 foreach (Type implementedInterface in interfaces)
                 {
                     if (IsTypeGeneric(implementedInterface) &&
-                        implementedInterface.GetGenericTypeDefinition() == typeof (IList<>))
+                        implementedInterface.GetGenericTypeDefinition() == typeof(IList<>))
                     {
                         return GetGenericTypeArguments(implementedInterface)[0];
                     }
@@ -1838,7 +1958,13 @@ namespace SimpleJson
             public static ConstructorDelegate GetConstructorByReflection(Type type, params Type[] argsType)
             {
                 ConstructorInfo constructorInfo = GetConstructorInfo(type, argsType);
-                return constructorInfo == null ? null : GetConstructorByReflection(constructorInfo);
+                // if it's a value type (i.e., struct), it won't have a default constructor, so use Activator instead
+                return constructorInfo == null ? (type.IsValueType ? GetConstructorForValueType(type) : null) : GetConstructorByReflection(constructorInfo);
+            }
+
+            static ConstructorDelegate GetConstructorForValueType(Type type)
+            {
+                return delegate(object[] args) { return Activator.CreateInstance(type); };
             }
 
 #if !SIMPLE_JSON_NO_LINQ_EXPRESSION
@@ -1865,7 +1991,8 @@ namespace SimpleJson
             public static ConstructorDelegate GetConstructorByExpression(Type type, params Type[] argsType)
             {
                 ConstructorInfo constructorInfo = GetConstructorInfo(type, argsType);
-                return constructorInfo == null ? null : GetConstructorByExpression(constructorInfo);
+                // if it's a value type (i.e., struct), it won't have a default constructor, so use Activator instead
+                return constructorInfo == null ? (type.IsValueType ? GetConstructorForValueType(type) : null) : GetConstructorByExpression(constructorInfo);
             }
 
 #endif
@@ -1925,6 +2052,9 @@ namespace SimpleJson
 #if SIMPLE_JSON_NO_LINQ_EXPRESSION
                 return GetSetMethodByReflection(propertyInfo);
 #else
+                // if it's a struct, we want to use reflection, as linq expressions modify copies of the object and not the real thing
+                if (propertyInfo.DeclaringType.IsValueType)
+                    return GetSetMethodByReflection(propertyInfo);
                 return GetSetMethodByExpression(propertyInfo);
 #endif
             }
@@ -1934,6 +2064,9 @@ namespace SimpleJson
 #if SIMPLE_JSON_NO_LINQ_EXPRESSION
                 return GetSetMethodByReflection(fieldInfo);
 #else
+                // if it's a struct, we want to use reflection, as linq expressions modify copies of the object and not the real thing
+                if (fieldInfo.DeclaringType.IsValueType)
+                    return GetSetMethodByReflection(fieldInfo);
                 return GetSetMethodByExpression(fieldInfo);
 #endif
             }
@@ -2119,6 +2252,111 @@ namespace SimpleJson
                 }
             }
 
+        }
+    /*
+}
+
+namespace GitHub.Unity
+{
+  
+    using GitHub.Unity.Json;
+      */
+    [System.AttributeUsage(System.AttributeTargets.Property |
+                       System.AttributeTargets.Field)]
+    public sealed class NotSerializedAttribute : Attribute
+    {
+    }
+
+    public static class JsonSerializerExtensions
+    {
+        static JsonSerializationStrategy publicLowerCaseStrategy = new JsonSerializationStrategy(true, true);
+        static JsonSerializationStrategy publicUpperCaseStrategy = new JsonSerializationStrategy(false, true);
+        static JsonSerializationStrategy privateLowerCaseStrategy = new JsonSerializationStrategy(true, false);
+        static JsonSerializationStrategy privateUpperCaseStrategy = new JsonSerializationStrategy(false, false);
+
+        public static string ToJson<T>(this T model, bool lowerCase = false, bool onlyPublic = true)
+        {
+            return SimpleJson.SerializeObject(model, GetStrategy(lowerCase, onlyPublic));
+        }
+
+        public static T FromJson<T>(this string json, bool lowerCase = false, bool onlyPublic = true)
+        {
+            return SimpleJson.DeserializeObject<T>(json, GetStrategy(lowerCase, onlyPublic));
+        }
+
+        public static T FromObject<T>(this object obj, bool lowerCase = false, bool onlyPublic = true)
+        {
+            if (obj == null)
+                return default(T);
+            var ret = GetStrategy(lowerCase, onlyPublic).DeserializeObject(obj, typeof(T));
+            if (ret is T)
+                return (T)ret;
+            return default(T);
+        }
+
+        private static JsonSerializationStrategy GetStrategy(bool lowerCase, bool onlyPublic)
+        {
+            if (lowerCase && onlyPublic)
+                return publicLowerCaseStrategy;
+            if (lowerCase && !onlyPublic)
+                return privateLowerCaseStrategy;
+            if (!lowerCase && onlyPublic)
+                return publicUpperCaseStrategy;
+            return privateUpperCaseStrategy;
+        }
+
+        /// <summary>
+        /// Convert from PascalCase to camelCase.
+        /// </summary>
+        private static string ToJsonPropertyName(string propertyName)
+        {
+            Guard.ArgumentNotNullOrWhiteSpace(propertyName, "propertyName");
+            int i = 0;
+            while (i < propertyName.Length && char.IsUpper(propertyName[i]))
+                i++;
+            return propertyName.Substring(0, i).ToLowerInvariant() + propertyName.Substring(i);
+        }
+
+        public class JsonSerializationStrategy : PocoJsonSerializerStrategy
+        {
+            private bool toLowerCase = false;
+            private bool onlyPublic = true;
+
+            public JsonSerializationStrategy(bool toLowerCase, bool onlyPublic)
+            {
+                this.toLowerCase = toLowerCase;
+                this.onlyPublic = onlyPublic;
+            }
+
+            protected override bool CanAddField(FieldInfo field)
+            {
+                var canAdd = base.CanAddField(field);
+                return canAdd && ((onlyPublic && field.IsPublic) || !onlyPublic);
+            }
+
+            protected override bool CanAddProperty(PropertyInfo property, MethodInfo method)
+            {
+                var canAdd = base.CanAddProperty(property, method);
+                if (!canAdd)
+                    return false;
+
+                // we always serialize public things
+                if (method.IsPublic)
+                    return true;
+
+                // if the getter is private and we're only serializing public things, skip this property
+                if (onlyPublic && method.Name.StartsWith("get_"))
+                    return false;
+
+                return true;
+            }
+
+            protected override string MapClrMemberNameToJsonFieldName(string clrPropertyName)
+            {
+                if (!toLowerCase)
+                    return base.MapClrMemberNameToJsonFieldName(clrPropertyName);
+                return ToJsonPropertyName(clrPropertyName);
+            }
         }
     }
 }
