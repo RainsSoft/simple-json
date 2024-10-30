@@ -50,7 +50,7 @@
 //#define SIMPLE_JSON_DATACONTRACT
 //#define SIMPLE_JSON_DYNAMIC
 #endif
-#region 对DNET35支持 2021-10-29
+#region 对DNET35支持 2024-10-30
 #define SIMPLE_JSON_DATACONTRACT
 #define SIMPLE_JSON_READONLY_COLLECTIONS
 #endregion
@@ -611,32 +611,7 @@ namespace SimpleJsonEx//GitHub.Unity.Json
             EscapeTable['\r'] = 'r';
             EscapeTable['\t'] = 't';
         }
-        private static System.Collections.Generic.Dictionary<string,Type> m_StringIDictionary = new System.Collections.Generic.Dictionary<string,Type>();
-        public static bool RegisterIDictionary<TValue>(IDictionary<string, TValue> objType) {
-            var dType = objType.GetType().FullName;
-            if (m_StringIDictionary.ContainsKey(dType) == false) {
-                //m_StringIDictionary.Add(dType,value);
-                return true;
-            }
-            return false;
-            /*
-             *     if (ReflectionUtils.IsTypeDictionary(type)) {
-                        // if dictionary then
-                        Type[] types = ReflectionUtils.GetGenericTypeArguments(type);
-                        Type keyType = types[0];
-                        Type valueType = types[1];
 
-                        Type genericType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
-
-                        IDictionary dict = (IDictionary)ConstructorCache[genericType]();
-
-                        foreach (KeyValuePair<string, object> kvp in jsonObject)
-                            dict.Add(kvp.Key, DeserializeObject(kvp.Value, valueType));
-
-                        obj = dict;
-                    }
-             */
-        }
         /// <summary>
         /// Parses the string json into a value
         /// </summary>
@@ -1071,7 +1046,7 @@ namespace SimpleJsonEx//GitHub.Unity.Json
                 //IDictionary<string, List<string>> dict2 = value as IDictionary<string, List<string>>;
                 bool isTypeDictionary = false;
                 if (ReflectionUtils.IsTypeDictionary(value.GetType())) {
-                    isTypeDictionary = true;                  
+                    isTypeDictionary = true;
                 }
                 if (dict != null) {
                     success = SerializeObject(jsonSerializerStrategy, dict.Keys, dict.Values, builder);
@@ -1083,7 +1058,12 @@ namespace SimpleJsonEx//GitHub.Unity.Json
                     // if dictionary then
                     Type ts = value.GetType();
                     object keys = ts.GetProperty("Keys").GetValue(value);
-                    object values= ts.GetProperty("Values").GetValue(value);               
+                    object values = ts.GetProperty("Values").GetValue(value);
+                    //字典key必须是string类型，否则不支持                   
+                    Type enumerableType = typeof(IEnumerable<string>);
+                    if (enumerableType.IsAssignableFrom(keys.GetType()) == false) {
+                        throw new Exception("SimpleJson serialize dictionary key must string type!");
+                    }
                     success = SerializeObject(jsonSerializerStrategy, (IEnumerable)keys, (IEnumerable)values, builder);
                 }
                 else {
@@ -1314,6 +1294,12 @@ namespace SimpleJsonEx//GitHub.Unity.Json
 
         internal virtual IDictionary<string, ReflectionUtils.GetDelegate> GetterValueFactory(Type type) {
             IDictionary<string, ReflectionUtils.GetDelegate> result = new Dictionary<string, ReflectionUtils.GetDelegate>();
+            // This prevents an group of exceptions thrown when a *thrown* exception is caught and serialized into JSON.
+            // Throwing adds a properties which cannot be got via the reflective code used and, even if these are bypassed,
+            // adds properties which when traversed cause an infinite loop - resulting in a stack overflow.
+            if (type.FullName == "System.Reflection.RuntimeMethodInfo" && type.IsSealed && type.IsNotPublic) {
+                return result;
+            }
             foreach (PropertyInfo propertyInfo in ReflectionUtils.GetProperties(type)) {
                 if (propertyInfo.CanRead) {
                     MethodInfo getMethod = ReflectionUtils.GetGetterMethodInfo(propertyInfo);
@@ -1429,10 +1415,10 @@ namespace SimpleJsonEx//GitHub.Unity.Json
             bool valueIsLong = value is long;
             bool valueIsULong = value is ulong;
             bool valueIsDouble = value is double;
-            if ((valueIsLong && type == typeof(long))|| (valueIsULong && type == typeof(ulong)) || (valueIsDouble && type == typeof(double)))
+            if ((valueIsLong && type == typeof(long)) || (valueIsULong && type == typeof(ulong)) || (valueIsDouble && type == typeof(double)))
                 return value;
-            if ((valueIsDouble && type != typeof(double)) || (valueIsULong && type != typeof(ulong))|| (valueIsLong && type != typeof(long))) {
-                obj = type == typeof(int) || type == typeof(uint)|| type == typeof(long) || type == typeof(ulong) || type == typeof(double) || type == typeof(float) || type == typeof(bool) || type == typeof(decimal) || type == typeof(byte) || type == typeof(short)
+            if ((valueIsDouble && type != typeof(double)) || (valueIsULong && type != typeof(ulong)) || (valueIsLong && type != typeof(long))) {
+                obj = type == typeof(int) || type == typeof(uint) || type == typeof(long) || type == typeof(ulong) || type == typeof(double) || type == typeof(float) || type == typeof(bool) || type == typeof(decimal) || type == typeof(byte) || type == typeof(short)
                             ? Convert.ChangeType(value, type, CultureInfo.InvariantCulture)
                             : value;
             }
