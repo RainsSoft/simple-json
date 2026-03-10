@@ -1,3 +1,5 @@
+
+SimpleJson-Unity support unity and aot complier look at [https://github.com/RS-Unity3D/RS.SimpleJson-Unity]https://github.com/RS-Unity3D/RS.SimpleJson-Unity
 # SimpleJson
 Small and fast JSON library for .NET 2.0+/SL4+/WP7+/Windows Store Apps/Portable Class Library and powershell.
 Includes support for dynamic in .NET 4.0+/SL4+/Windows Store Apps. Also includes support for DataContract and DataMember. 
@@ -31,3 +33,4 @@ Install-Package SimpleJson
 If you want to use `[DataContract]`, `[DataMember(Name = "name")]` or `[IgnoreDataMember]` make sure to add `#define SIMPLE_JSON_DATACONTRACT`.
 
 If you want to use `IReadOnlyCollection<T>` and `IReadOnlyList<T>` make sure to add `#define SIMPLE_JSON_READONLY_COLLECTIONS`.
+
